@@ -495,13 +495,33 @@
       window.addEventListener('scroll',function(){var s=$('#stickyCta');if(window.scrollY>600)s.classList.add('is-visible');else s.classList.remove('is-visible')},{passive:true});
       $('#leadForm').addEventListener('submit',function(e){
         e.preventDefault();
-        /* ═══ BACKEND HOOK: Replace with your endpoint ═══
-        var data=new FormData(this);
-        fetch('https://your-api.com/lead',{method:'POST',body:data})
-          .then(function(r){return r.json()}).then(function(){showSuccess()});
-        ═══════════════════════════════════════════════════ */
-        this.style.display='none';$('#formSuccess').classList.add('is-active');
-        var form=this;setTimeout(function(){$('#formSuccess').classList.remove('is-active');form.style.display='block';form.reset()},5000);
+        var form=this;
+        var btn=form.querySelector('.form-submit');
+        var originalText=btn.textContent;
+        btn.disabled=true;
+        btn.textContent='Enviando…';
+        var data={};
+        new FormData(form).forEach(function(v,k){data[k]=v});
+        fetch('/api/lead',{
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify(data)
+        })
+        .then(function(r){return r.json()})
+        .then(function(res){
+          if(res.ok){
+            form.style.display='none';
+            $('#formSuccess').classList.add('is-active');
+            setTimeout(function(){$('#formSuccess').classList.remove('is-active');form.style.display='block';form.reset();btn.disabled=false;btn.textContent=originalText},6000);
+          } else {
+            alert('Something went wrong. Please call us at +1-787-325-0146.');
+            btn.disabled=false;btn.textContent=originalText;
+          }
+        })
+        .catch(function(){
+          alert('Something went wrong. Please call us at +1-787-325-0146.');
+          btn.disabled=false;btn.textContent=originalText;
+        });
       });
       $('#langToggle').addEventListener('click',function(){lang=lang==='es'?'en':'es';updateTranslations();renderServices();renderWhy();renderProjects();startObserver()});
       $('#hamburger').addEventListener('click',function(){$('#navLinks').classList.toggle('is-open')});
