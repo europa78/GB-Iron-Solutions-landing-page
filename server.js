@@ -3,6 +3,7 @@ const express = require('express');
 const nodemailer = require('nodemailer');
 const cors = require('cors');
 const path = require('path');
+const rateLimit = require('express-rate-limit');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -15,6 +16,15 @@ app.use(express.urlencoded({ extended: true }));
 // Serve the landing page HTML as the root
 app.use(express.static(path.join(__dirname)));
 
+// ── Rate limiting: max 5 form submissions per IP per hour ──────────────────
+const leadLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 5,
+  message: { ok: false, error: 'Too many requests. Please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // ── Nodemailer transporter (Gmail) ─────────────────────────────────────────
 const transporter = nodemailer.createTransport({
   service: 'gmail',
@@ -24,17 +34,43 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-// ── POST /api/lead ─────────────────────────────────────────────────────────
-app.post('/api/lead', async (req, res) => {
-  const { nombre, apellido, email, telefono, servicio, mensaje } = req.body;
+// ── Helpers ────────────────────────────────────────────────────────────────
+function sanitize(str) {
+  if (typeof str !== 'string') return '';
+  return str.replace(/[<>&"']/g, c => ({ '<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;' }[c])).trim();
+}
 
-  // Basic validation
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// ── POST /api/lead ─────────────────────────────────────────────────────────
+app.post('/api/lead', leadLimiter, async (req, res) => {
+  // Honeypot — bots fill hidden fields, humans don't
+  if (req.body.website) {
+    return res.json({ ok: true }); // silently discard
+  }
+
+  const nombre   = sanitize(req.body.nombre   || '').slice(0, 80);
+  const apellido = sanitize(req.body.apellido || '').slice(0, 80);
+  const email    = sanitize(req.body.email    || '').slice(0, 254);
+  const telefono = sanitize(req.body.telefono || '').slice(0, 30);
+  const servicio = sanitize(req.body.servicio || '').slice(0, 50);
+  const mensaje  = sanitize(req.body.mensaje  || '').slice(0, 2000);
+
+  // Server-side validation
   if (!nombre || !email || !telefono) {
     return res.status(400).json({ ok: false, error: 'Missing required fields.' });
   }
+  if (!EMAIL_RE.test(email)) {
+    return res.status(400).json({ ok: false, error: 'Invalid email address.' });
+  }
+
+  const VALID_SERVICES = ['soldadura','estructuras','galvanizado','pasamanos','pergolas','techos','otro',''];
+  if (!VALID_SERVICES.includes(req.body.servicio || '')) {
+    return res.status(400).json({ ok: false, error: 'Invalid service selection.' });
+  }
 
   const serviceLabel = servicio || 'Not specified';
-  const fullName = `${nombre} ${apellido || ''}`.trim();
+  const fullName = `${nombre} ${apellido}`.trim();
 
   // ── Email sent TO the company ────────────────────────────────────────────
   const companyMail = {
